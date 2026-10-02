@@ -1,4 +1,4 @@
-﻿import { Hono } from "hono";
+import { Hono } from "hono";
 import { cors } from "hono/cors";
 
 import auth from "./routes/auth";
@@ -26,10 +26,13 @@ const app = new Hono<{
 app.use(
   "/api/*",
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://127.0.0.1:5173",
-    ],
+    origin: (origin) => {
+      // Allow localhost for dev and pages.dev for production
+      if (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:") || origin.endsWith(".pages.dev")) {
+        return origin;
+      }
+      return "http://localhost:5173";
+    },
     allowMethods: [
       "GET",
       "POST",
