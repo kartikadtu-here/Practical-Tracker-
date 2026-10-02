@@ -321,13 +321,8 @@ function Login({
 }: {
   onLogin: (me: Me) => void;
 }) {
-  const [email, setEmail] = useState(
-    "teacher@dbms.local",
-  );
-
-  const [password, setPassword] = useState(
-    "Teacher@123",
-  );
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   const [showPassword, setShowPassword] =
     useState(false);
