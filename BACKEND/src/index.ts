@@ -27,8 +27,7 @@ app.use(
   "/api/*",
   cors({
     origin: (origin) => {
-      // Allow localhost for dev and pages.dev for production
-      if (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:") || origin.endsWith(".pages.dev")) {
+      if (origin.startsWith("http://localhost:") || origin.startsWith("http://127.0.0.1:") || origin.endsWith(".pages.dev") || origin.endsWith(".workers.dev")) {
         return origin;
       }
       return "http://localhost:5173";
