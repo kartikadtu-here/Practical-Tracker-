@@ -1,0 +1,1358 @@
+﻿import { useEffect, useMemo, useState } from "react";
+import {
+  Activity,
+  ArrowDownToLine,
+  ArrowRight,
+  BarChart3,
+  BookOpen,
+  Check,
+  CheckCircle2,
+  ChevronDown,
+  ClipboardCheck,
+  Database,
+  FileSpreadsheet,
+  FileText,
+  History,
+  LayoutDashboard,
+  LogOut,
+  Menu,
+  Moon,
+  Plus,
+  RefreshCw,
+  Search,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Sun,
+  Table2,
+  Upload,
+  Users,
+  X,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
+
+const API = import.meta.env.VITE_API_URL || "http://localhost:8787";
+
+type Theme = "light" | "dark";
+type Page =
+  | "dashboard"
+  | "students"
+  | "tracker"
+  | "practicals"
+  | "ocr"
+  | "history"
+  | "exports"
+  | "sql"
+  | "settings";
+
+type Student = {
+  id: string;
+  rollNumber: string;
+  name: string;
+  studentListId?: string;
+  createdAt?: string;
+};
+
+type Practical = {
+  id: string;
+  practicalNumber: number;
+  title: string;
+  description?: string | null;
+  isActive?: boolean | number;
+};
+
+type Submission = {
+  id?: string;
+  studentId: string;
+  practicalId: string;
+  submitted: boolean | number;
+  submittedAt?: string | null;
+  updatedAt?: string;
+};
+
+type Dashboard = {
+  students?: { total: number };
+  practicals?: { total: number };
+  activePractical?: Practical | null;
+  submissions?: {
+    totalPossible: number;
+    submitted: number;
+    pending: number;
+    progress: number;
+  };
+  practicalProgress?: Array<{
+    id: string;
+    practicalNumber: number;
+    title: string;
+    submitted: number;
+    pending: number;
+    totalStudents: number;
+    progress: number;
+  }>;
+};
+
+type ActivityItem = {
+  id?: string;
+  action?: string;
+  oldValue?: string | null;
+  newValue?: string | null;
+  createdAt?: string;
+  studentName?: string;
+  rollNumber?: string;
+  practicalNumber?: number;
+};
+
+type OcrStudent = { rollNumber: string; name: string };
+
+type Me = {
+  id: string;
+  email: string;
+  name: string;
+};
+
+async function api<T = any>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers = new Headers(options.headers);
+  if (options.body && !(options.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const response = await fetch(`${API}${path}`, {
+    ...options,
+    headers,
+    credentials: "include",
+  });
+
+  const contentType = response.headers.get("content-type") || "";
+  const body = contentType.includes("application/json")
+    ? await response.json()
+    : await response.text();
+
+  if (!response.ok) {
+    const message =
+      typeof body === "object" && body
+        ? body.message || body.error || `Request failed (${response.status})`
+        : `Request failed (${response.status})`;
+    throw new Error(message);
+  }
+
+  return body as T;
+}
+
+function unwrap<T>(body: any, fallback: T): T {
+  if (body?.data !== undefined) return body.data as T;
+  return body ?? fallback;
+}
+
+function bool(value: boolean | number | undefined) {
+  return value === true || value === 1;
+}
+
+function initials(name: string) {
+  return name
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase();
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function useHashPage(): [Page, (page: Page) => void] {
+  const read = (): Page => {
+    const value = window.location.hash.replace(/^#\/?/, "") as Page;
+    const pages: Page[] = [
+      "dashboard",
+      "students",
+      "tracker",
+      "practicals",
+      "ocr",
+      "history",
+      "exports",
+      "sql",
+      "settings",
+    ];
+    return pages.includes(value) ? value : "dashboard";
+  };
+
+  const [page, setPage] = useState<Page>(read);
+
+  useEffect(() => {
+    const onHash = () => setPage(read());
+    window.addEventListener("hashchange", onHash);
+    return () => window.removeEventListener("hashchange", onHash);
+  }, []);
+
+  const navigate = (next: Page) => {
+    window.location.hash = `/${next}`;
+    setPage(next);
+  };
+
+  return [page, navigate];
+}
+
+function Brand() {
+  return (
+    <div className="brand">
+      <div className="brand-mark">
+        <Database size={19} strokeWidth={2.2} />
+      </div>
+      <div>
+        <strong>PracticalTracker</strong>
+        <span>DBMS workspace</span>
+      </div>
+    </div>
+  );
+}
+
+function Login({ onLogin }: { onLogin: (me: Me) => void }) {
+  const [email, setEmail] = useState("teacher@dbms.local");
+  const [password, setPassword] = useState("Teacher@123");
+  const [showPassword, setShowPassword] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+
+    try {
+      const result = await api<any>("/api/auth/login", {
+        method: "POST",
+        body: JSON.stringify({ email, password }),
+      });
+
+      const me = unwrap<Me | null>(result?.data?.teacher ? result.data.teacher : result?.data, null);
+      if (me?.id) {
+        onLogin(me);
+        return;
+      }
+
+      const session = await api<any>("/api/auth/me");
+      onLogin(unwrap<Me>(session, session));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to sign in.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <main className="auth-shell">
+      <div className="auth-orbit orbit-one" />
+      <div className="auth-orbit orbit-two" />
+
+      <section className="auth-card">
+        <div className="auth-brand">
+          <div className="brand-mark large">
+            <Database size={23} />
+          </div>
+          <div>
+            <strong>PracticalTracker</strong>
+            <span>Teacher workspace</span>
+          </div>
+        </div>
+
+        <div className="auth-heading">
+          <div className="eyebrow">DBMS PRACTICAL TRACKER</div>
+          <h1>Welcome back.</h1>
+          <p>Track students, submissions and practical progress from one focused workspace.</p>
+        </div>
+
+        <form className="auth-form" onSubmit={submit}>
+          <label>
+            <span>Email</span>
+            <div className="input-wrap">
+              <ShieldCheck size={16} />
+              <input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                type="email"
+                autoComplete="username"
+                placeholder="teacher@example.com"
+                required
+              />
+            </div>
+          </label>
+
+          <label>
+            <span>Password</span>
+            <div className="input-wrap">
+              <ShieldCheck size={16} />
+              <input
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
+                required
+              />
+              <button
+                type="button"
+                className="input-action"
+                onClick={() => setShowPassword((value) => !value)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? "Hide" : "Show"}
+              </button>
+            </div>
+          </label>
+
+          {error && (
+            <div className="form-error">
+              <X size={16} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <button className="primary-btn auth-submit" disabled={busy}>
+            {busy ? <RefreshCw size={17} className="spin" /> : <ArrowRight size={17} />}
+            {busy ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+
+        <div className="auth-note">
+          <CheckCircle2 size={15} />
+          <span>Teacher-only access · Secure session</span>
+        </div>
+      </section>
+
+      <div className="auth-footer">DBMS Practical Tracker · Local development workspace</div>
+    </main>
+  );
+}
+
+function AppShell({
+  me,
+  page,
+  navigate,
+  theme,
+  setTheme,
+  onLogout,
+  children,
+}: {
+  me: Me;
+  page: Page;
+  navigate: (page: Page) => void;
+  theme: Theme;
+  setTheme: (theme: Theme) => void;
+  onLogout: () => void;
+  children: React.ReactNode;
+}) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  const groups: Array<{ label: string; items: Array<[Page, string, LucideIcon]> }> = [
+    {
+      label: "Workspace",
+      items: [
+        ["dashboard", "Dashboard", LayoutDashboard],
+        ["students", "Students", Users],
+        ["tracker", "Submission Tracker", ClipboardCheck],
+        ["practicals", "Practicals", BookOpen],
+        ["ocr", "OCR Import", Upload],
+      ],
+    },
+    {
+      label: "Insights",
+      items: [
+        ["history", "History", History],
+        ["exports", "Exports", FileText],
+        ["sql", "SQL Lab", Database],
+      ],
+    },
+  ];
+
+  function go(next: Page) {
+    navigate(next);
+    setMobileOpen(false);
+  }
+
+  return (
+    <div className="app-shell">
+      <aside className={`sidebar ${mobileOpen ? "mobile-open" : ""}`}>
+        <div className="sidebar-top">
+          <Brand />
+          <button className="mobile-close icon-btn" onClick={() => setMobileOpen(false)}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="sidebar-scroll">
+          {groups.map(([label, items]) => (
+            <div className="nav-group" key={label}>
+              <div className="nav-label">{label}</div>
+              {items.map(([id, title, Icon]) => (
+                <button
+                  key={id}
+                  className={`nav-item ${page === id ? "active" : ""}`}
+                  onClick={() => go(id as Page)}
+                >
+                  <Icon size={17} />
+                  <span>{title}</span>
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
+
+        <div className="sidebar-bottom">
+          <button className={`nav-item ${page === "settings" ? "active" : ""}`} onClick={() => go("settings")}>
+            <Settings size={17} />
+            <span>Settings</span>
+          </button>
+
+          <button className="nav-item logout-nav" onClick={onLogout}>
+            <LogOut size={17} />
+            <span>Log out</span>
+          </button>
+
+          <div className="profile-card">
+            <div className="avatar">{initials(me.name)}</div>
+            <div className="profile-copy">
+              <strong>{me.name}</strong>
+              <span>Teacher account</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {mobileOpen && <button className="mobile-backdrop" onClick={() => setMobileOpen(false)} />}
+
+      <main className="main-shell">
+        <header className="topbar">
+          <div className="topbar-left">
+            <button className="icon-btn mobile-menu" onClick={() => setMobileOpen(true)}>
+              <Menu size={19} />
+            </button>
+            <div>
+              <div className="breadcrumb">DBMS / {page.replace("-", " ")}</div>
+              <h2>{page === "dashboard" ? "Dashboard" : page === "tracker" ? "Submission Tracker" : page[0].toUpperCase() + page.slice(1)}</h2>
+            </div>
+          </div>
+
+          <div className="topbar-actions">
+            <div className="connection-pill">
+              <span className="status-dot" />
+              Local backend
+            </div>
+            <button
+              className="theme-toggle"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              title="Toggle theme"
+            >
+              {theme === "dark" ? <Sun size={16} /> : <Moon size={16} />}
+              <span>{theme === "dark" ? "Light" : "Dark"}</span>
+            </button>
+          </div>
+        </header>
+
+        <div className="page-content">{children}</div>
+      </main>
+    </div>
+  );
+}
+
+function PageHeader({
+  eyebrow,
+  title,
+  description,
+  action,
+}: {
+  eyebrow: string;
+  title: React.ReactNode;
+  description: string;
+  action?: React.ReactNode;
+}) {
+  return (
+    <div className="page-header">
+      <div>
+        <div className="eyebrow">{eyebrow}</div>
+        <h1>{title}</h1>
+        <p>{description}</p>
+      </div>
+      {action}
+    </div>
+  );
+}
+
+function StatCard({
+  icon: Icon,
+  label,
+  value,
+  hint,
+  tone = "green",
+}: {
+  icon: typeof Users;
+  label: string;
+  value: string | number;
+  hint: string;
+  tone?: "green" | "gold" | "blue" | "rose";
+}) {
+  return (
+    <article className={`stat-card ${tone}`}>
+      <div className="stat-icon"><Icon size={18} /></div>
+      <div className="stat-label">{label}</div>
+      <strong>{value}</strong>
+      <span>{hint}</span>
+    </article>
+  );
+}
+
+function DashboardPage({ navigate }: { navigate: (page: Page) => void }) {
+  const [summary, setSummary] = useState<Dashboard | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  async function load() {
+    setLoading(true);
+    setError("");
+    try {
+      const result = await api<any>("/api/dashboard/summary");
+      setSummary(unwrap<Dashboard>(result, {}));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to load dashboard.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const students = summary?.students?.total ?? 0;
+  const practicals = summary?.practicals?.total ?? 0;
+  const submitted = summary?.submissions?.submitted ?? 0;
+  const pending = summary?.submissions?.pending ?? 0;
+  const progress = summary?.submissions?.progress ?? 0;
+  const active = summary?.activePractical;
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="DBMS PRACTICAL TRACKER"
+        title={<>Keep every practical<br /><em>under control.</em></>}
+        description="Track student submissions, manage practicals and generate reports without maintaining a manual diary."
+        action={<button className="secondary-btn" onClick={load}><RefreshCw size={16} /> Refresh</button>}
+      />
+
+      {error && <InlineError message={error} />}
+
+      <section className="stats-grid">
+        <StatCard icon={Users} label="Students" value={loading ? "…" : students} hint="Total students" />
+        <StatCard icon={BookOpen} label="Practicals" value={loading ? "…" : practicals} hint="Tracked practicals" tone="blue" />
+        <StatCard icon={CheckCircle2} label="Submitted" value={loading ? "…" : submitted} hint={`of ${summary?.submissions?.totalPossible ?? 0}`} tone="green" />
+        <StatCard icon={Activity} label="Pending" value={loading ? "…" : pending} hint="Need attention" tone="gold" />
+      </section>
+
+      <section className="dashboard-grid">
+        <article className="panel hero-panel">
+          <div className="panel-head">
+            <div>
+              <div className="eyebrow">CURRENT PRACTICAL</div>
+              <h3>{active ? `Practical ${active.practicalNumber}` : "No active practical"}</h3>
+              <p>{active?.title || "Create a practical to begin tracking."}</p>
+            </div>
+            <div className="hero-chip"><Zap size={15} /> Live</div>
+          </div>
+
+          <div className="hero-progress">
+            <strong>{progress.toFixed(1)}%</strong>
+            <span>completion</span>
+          </div>
+
+          <div className="progress-track">
+            <div style={{ width: `${Math.min(100, Math.max(0, progress))}%` }} />
+          </div>
+
+          <div className="hero-footer">
+            <span><b>{submitted}</b> submitted</span>
+            <span><b>{pending}</b> pending</span>
+          </div>
+        </article>
+
+        <article className="panel quick-panel">
+          <div className="panel-head">
+            <div>
+              <div className="eyebrow">QUICK ACTIONS</div>
+              <h3>What do you need?</h3>
+            </div>
+          </div>
+          <QuickAction icon={ClipboardCheck} title="Mark submissions" subtitle="Update today’s practical" onClick={() => navigate("tracker")} />
+          <QuickAction icon={Upload} title="Import students" subtitle="Use OCR from an image" onClick={() => navigate("ocr")} />
+          <QuickAction icon={FileText} title="Generate report" subtitle="PDF or Excel export" onClick={() => navigate("exports")} />
+        </article>
+      </section>
+
+      <article className="panel">
+        <div className="panel-head">
+          <div>
+            <div className="eyebrow">PRACTICAL OVERVIEW</div>
+            <h3>Submission progress</h3>
+          </div>
+          <button className="text-btn" onClick={() => navigate("tracker")}>Open tracker <ArrowRight size={15} /></button>
+        </div>
+
+        {summary?.practicalProgress?.length ? (
+          <div className="progress-list">
+            {summary.practicalProgress.map((item) => (
+              <div className="progress-row" key={item.id}>
+                <div className="progress-title">
+                  <div className="number-badge">{item.practicalNumber}</div>
+                  <div>
+                    <strong>{item.title}</strong>
+                    <span>{item.submitted} submitted · {item.pending} pending</span>
+                  </div>
+                </div>
+                <div className="progress-value">{Number(item.progress).toFixed(0)}%</div>
+                <div className="mini-progress"><div style={{ width: `${item.progress}%` }} /></div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState icon={BarChart3} title="No practical progress yet" description="Create a practical and start tracking submissions." />
+        )}
+      </article>
+    </>
+  );
+}
+
+function QuickAction({
+  icon: Icon,
+  title,
+  subtitle,
+  onClick,
+}: {
+  icon: typeof Upload;
+  title: string;
+  subtitle: string;
+  onClick: () => void;
+}) {
+  return (
+    <button className="quick-action" onClick={onClick}>
+      <div className="quick-icon"><Icon size={17} /></div>
+      <div><strong>{title}</strong><span>{subtitle}</span></div>
+      <ArrowRight size={16} />
+    </button>
+  );
+}
+
+function StudentsPage({ navigate }: { navigate: (page: Page) => void }) {
+  const [students, setStudents] = useState<Student[]>([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const result = await api<any>("/api/students");
+      setStudents(unwrap<Student[]>(result, []));
+    } catch {
+      setStudents([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const filtered = useMemo(
+    () =>
+      students.filter((student) =>
+        `${student.rollNumber} ${student.name}`.toLowerCase().includes(search.toLowerCase())
+      ),
+    [students, search]
+  );
+
+  return (
+    <>
+      <PageHeader
+        eyebrow={`${students.length} STUDENTS`}
+        title="Student register"
+        description="Students imported from the teacher’s official list appear here. Identity data stays protected from routine edits."
+        action={<button className="primary-btn" onClick={() => navigate("ocr")}><Upload size={16} /> Import list</button>}
+      />
+
+      <article className="panel">
+        <div className="toolbar">
+          <div className="search-box">
+            <Search size={17} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search roll number or student name…" />
+          </div>
+          <button className="secondary-btn" onClick={load}><RefreshCw size={16} /> Refresh</button>
+        </div>
+
+        {loading ? <Loading /> : filtered.length ? (
+          <div className="data-table-wrap">
+            <table className="data-table">
+              <thead><tr><th>Roll</th><th>Student</th><th>Source</th><th>Status</th></tr></thead>
+              <tbody>
+                {filtered.map((student) => (
+                  <tr key={student.id}>
+                    <td><span className="roll-pill">{student.rollNumber}</span></td>
+                    <td><div className="student-cell"><div className="avatar small">{initials(student.name)}</div><strong>{student.name}</strong></div></td>
+                    <td><span className="muted">Imported list</span></td>
+                    <td><span className="status-pill success"><Check size={13} /> Active</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <EmptyState icon={Users} title="No students yet" description="Upload a student list through OCR to populate the register." action={<button className="primary-btn" onClick={() => navigate("ocr")}><Upload size={16} /> Import students</button>} />
+        )}
+      </article>
+    </>
+  );
+}
+
+function TrackerPage() {
+  const [students, setStudents] = useState<Student[]>([]);
+  const [practicals, setPracticals] = useState<Practical[]>([]);
+  const [selected, setSelected] = useState("");
+  const [submissions, setSubmissions] = useState<Submission[]>([]);
+  const [changes, setChanges] = useState<Record<string, boolean>>({});
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function loadBase() {
+    setLoading(true);
+    try {
+      const [studentResult, practicalResult] = await Promise.all([
+        api<any>("/api/students"),
+        api<any>("/api/practicals"),
+      ]);
+      const nextStudents = unwrap<Student[]>(studentResult, []);
+      const nextPracticals = unwrap<Practical[]>(practicalResult, []);
+      setStudents(nextStudents);
+      setPracticals(nextPracticals);
+      if (!selected && nextPracticals[0]) setSelected(nextPracticals[0].id);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function loadSubmissions(practicalId: string) {
+    if (!practicalId) {
+      setSubmissions([]);
+      return;
+    }
+    try {
+      const result = await api<any>(`/api/submissions?practicalId=${encodeURIComponent(practicalId)}`);
+      setSubmissions(unwrap<Submission[]>(result, []));
+      setChanges({});
+      setMessage("");
+    } catch {
+      setSubmissions([]);
+    }
+  }
+
+  useEffect(() => {
+    void loadBase();
+  }, []);
+
+  useEffect(() => {
+    if (selected) void loadSubmissions(selected);
+  }, [selected]);
+
+  const submissionMap = useMemo(
+    () => new Map(submissions.map((item) => [item.studentId, bool(item.submitted)])),
+    [submissions]
+  );
+
+  const filtered = students.filter((student) =>
+    `${student.rollNumber} ${student.name}`.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const stagedCount = Object.keys(changes).length;
+
+  function toggle(studentId: string) {
+    const current = changes[studentId] ?? submissionMap.get(studentId) ?? false;
+    setChanges((previous) => ({ ...previous, [studentId]: !current }));
+  }
+
+  async function apply() {
+    if (!selected || stagedCount === 0) return;
+    setSaving(true);
+    setMessage("");
+    try {
+      await api("/api/submissions/apply", {
+        method: "POST",
+        body: JSON.stringify({
+          changes: Object.entries(changes).map(([studentId, submitted]) => ({
+            studentId,
+            practicalId: selected,
+            submitted,
+          })),
+        }),
+      });
+      await loadSubmissions(selected);
+      setMessage("Changes applied successfully.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Unable to apply changes.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="SUBMISSION TRACKER"
+        title="Mark practical submissions"
+        description="Changes stay staged in the browser until you press Apply changes. Student identity cannot be edited here."
+        action={
+          <button className="primary-btn" disabled={!stagedCount || saving} onClick={apply}>
+            {saving ? <RefreshCw size={16} className="spin" /> : <Check size={16} />}
+            {saving ? "Applying…" : `Apply changes${stagedCount ? ` · ${stagedCount}` : ""}`}
+          </button>
+        }
+      />
+
+      <div className="tracker-toolbar">
+        <label className="select-field">
+          <span>Practical</span>
+          <select value={selected} onChange={(e) => setSelected(e.target.value)}>
+            <option value="">Select practical</option>
+            {practicals.map((item) => (
+              <option key={item.id} value={item.id}>
+                Practical {item.practicalNumber} · {item.title}
+              </option>
+            ))}
+          </select>
+          <ChevronDown size={15} />
+        </label>
+
+        <div className="search-box">
+          <Search size={17} />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Find a student…" />
+        </div>
+
+        {message && <span className={`save-message ${message.includes("successfully") ? "success" : "error"}`}>{message}</span>}
+      </div>
+
+      <article className="panel tracker-panel">
+        {!selected ? (
+          <EmptyState icon={ClipboardCheck} title="Choose a practical" description="Select a practical above to start marking submissions." />
+        ) : loading ? <Loading /> : (
+          <div className="data-table-wrap">
+            <table className="data-table tracker-table">
+              <thead><tr><th>Roll</th><th>Student</th><th>Submission</th><th>Action</th></tr></thead>
+              <tbody>
+                {filtered.map((student) => {
+                  const submitted = changes[student.id] ?? submissionMap.get(student.id) ?? false;
+                  const staged = student.id in changes;
+                  return (
+                    <tr key={student.id} className={staged ? "staged-row" : ""}>
+                      <td><span className="roll-pill">{student.rollNumber}</span></td>
+                      <td><div className="student-cell"><div className="avatar small">{initials(student.name)}</div><strong>{student.name}</strong></div></td>
+                      <td>
+                        <span className={`status-pill ${submitted ? "success" : "pending"}`}>
+                          {submitted ? <Check size={13} /> : <Activity size={13} />}
+                          {submitted ? "Submitted" : "Pending"}
+                        </span>
+                        {staged && <span className="staged-label">unsaved</span>}
+                      </td>
+                      <td>
+                        <button className={`toggle ${submitted ? "on" : ""}`} onClick={() => toggle(student.id)}>
+                          <span />
+                          {submitted ? "Submitted" : "Mark submitted"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </article>
+    </>
+  );
+}
+
+function PracticalsPage() {
+  const [items, setItems] = useState<Practical[]>([]);
+  const [form, setForm] = useState({ practicalNumber: "", title: "", description: "" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  async function load() {
+    try {
+      const result = await api<any>("/api/practicals");
+      setItems(unwrap<Practical[]>(result, []));
+    } catch {
+      setItems([]);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  async function create(event: React.FormEvent) {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      await api("/api/practicals", {
+        method: "POST",
+        body: JSON.stringify({
+          practicalNumber: Number(form.practicalNumber),
+          title: form.title,
+          description: form.description || null,
+          isActive: true,
+        }),
+      });
+      setForm({ practicalNumber: "", title: "", description: "" });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to create practical.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      <PageHeader eyebrow={`${items.length} PRACTICALS`} title="Practical catalogue" description="Create and organize the practicals that your class needs to submit." />
+      <section className="two-column">
+        <article className="panel">
+          <div className="panel-head"><div><div className="eyebrow">NEW PRACTICAL</div><h3>Create practical</h3></div><Plus size={18} /></div>
+          <form className="stack-form" onSubmit={create}>
+            <label><span>Practical number</span><input type="number" min="1" value={form.practicalNumber} onChange={(e) => setForm({ ...form, practicalNumber: e.target.value })} required /></label>
+            <label><span>Title</span><input value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} placeholder="DBMS Introduction" required /></label>
+            <label><span>Description</span><textarea value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What this practical covers…" rows={4} /></label>
+            {error && <InlineError message={error} />}
+            <button className="primary-btn" disabled={saving}>{saving ? "Creating…" : "Create practical"}</button>
+          </form>
+        </article>
+
+        <article className="panel">
+          <div className="panel-head"><div><div className="eyebrow">CATALOGUE</div><h3>Existing practicals</h3></div><BookOpen size={18} /></div>
+          {items.length ? <div className="practical-list">
+            {items.map((item) => (
+              <div className="practical-item" key={item.id}>
+                <div className="number-badge large">{item.practicalNumber}</div>
+                <div><strong>{item.title}</strong><span>{item.description || "No description"}</span></div>
+                <span className={`status-pill ${bool(item.isActive) ? "success" : "pending"}`}>{bool(item.isActive) ? "Active" : "Inactive"}</span>
+              </div>
+            ))}
+          </div> : <EmptyState icon={BookOpen} title="No practicals" description="Create the first practical using the form." />}
+        </article>
+      </section>
+    </>
+  );
+}
+
+function OcrPage({ navigate }: { navigate: (page: Page) => void }) {
+  const [file, setFile] = useState<File | null>(null);
+  const [preview, setPreview] = useState("");
+  const [students, setStudents] = useState<OcrStudent[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  function choose(next: File | null) {
+    setFile(next);
+    setStudents([]);
+    setError("");
+    setMessage("");
+    if (next) setPreview(URL.createObjectURL(next));
+    else setPreview("");
+  }
+
+  async function runOcr() {
+    if (!file) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      const result = await api<any>("/api/ocr", { method: "POST", body });
+      const extracted =
+        result?.data?.students ||
+        result?.students ||
+        (Array.isArray(result?.data) ? result.data : []);
+      setStudents(
+        (extracted as any[]).map((item) => ({
+          rollNumber: String(item.rollNumber ?? item.roll ?? ""),
+          name: String(item.name ?? "").trim(),
+        })).filter((item) => item.rollNumber && item.name)
+      );
+      setMessage("OCR complete. Review the extracted rows before importing.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "OCR failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmImport() {
+    if (!students.length) return;
+    setImporting(true);
+    setError("");
+    try {
+      await api("/api/students/import", {
+        method: "POST",
+        body: JSON.stringify({ students }),
+      });
+      setMessage(`${students.length} students imported successfully.`);
+      setStudents([]);
+      setFile(null);
+      setPreview("");
+      navigate("students");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Import failed.");
+    } finally {
+      setImporting(false);
+    }
+  }
+
+  return (
+    <>
+      <PageHeader eyebrow="OCR IMPORT" title="Turn a student list into data" description="Upload an image, let OCR extract the rows, review the result and only then write it into D1." />
+      <section className="ocr-layout">
+        <article className="panel upload-panel">
+          <div className="dropzone" onClick={() => document.getElementById("student-image")?.click()}>
+            <div className="upload-icon"><Upload size={22} /></div>
+            <h3>{file ? file.name : "Drop student list here"}</h3>
+            <p>PNG or JPG · Review before import</p>
+            <button type="button" className="secondary-btn">Choose image</button>
+            <input id="student-image" type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={(e) => choose(e.target.files?.[0] || null)} />
+          </div>
+
+          {preview && <div className="preview-wrap"><img src={preview} alt="Student list preview" /></div>}
+
+          <div className="ocr-actions">
+            <button className="primary-btn" disabled={!file || busy} onClick={runOcr}>
+              {busy ? <><RefreshCw size={16} className="spin" /> Reading image…</> : <><Sparkles size={16} /> Extract students</>}
+            </button>
+            {file && <button className="secondary-btn" onClick={() => choose(null)}><X size={16} /> Clear</button>}
+          </div>
+          {error && <InlineError message={error} />}
+          {message && <div className="success-banner"><CheckCircle2 size={16} /> {message}</div>}
+        </article>
+
+        <article className="panel">
+          <div className="panel-head">
+            <div><div className="eyebrow">REVIEW QUEUE</div><h3>Extracted students</h3></div>
+            <span className="count-chip">{students.length}</span>
+          </div>
+
+          {students.length ? (
+            <>
+              <div className="review-list">
+                {students.map((student, index) => (
+                  <div className="review-row" key={`${student.rollNumber}-${index}`}>
+                    <input value={student.rollNumber} onChange={(e) => setStudents((all) => all.map((x, i) => i === index ? { ...x, rollNumber: e.target.value } : x))} />
+                    <input value={student.name} onChange={(e) => setStudents((all) => all.map((x, i) => i === index ? { ...x, name: e.target.value } : x))} />
+                    <button className="icon-btn danger" onClick={() => setStudents((all) => all.filter((_, i) => i !== index))}><X size={15} /></button>
+                  </div>
+                ))}
+              </div>
+              <button className="primary-btn full" disabled={importing} onClick={confirmImport}>
+                {importing ? "Importing…" : `Confirm import · ${students.length} students`}
+              </button>
+            </>
+          ) : (
+            <EmptyState icon={Table2} title="Nothing to review" description="Your OCR results will appear here before they are saved." />
+          )}
+        </article>
+      </section>
+    </>
+  );
+}
+
+function HistoryPage() {
+  const [items, setItems] = useState<ActivityItem[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const result = await api<any>("/api/submissions/history");
+      setItems(unwrap<ActivityItem[]>(result, []));
+    } catch {
+      setItems([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  return (
+    <>
+      <PageHeader eyebrow="AUDIT TRAIL" title="Submission history" description="See when submission status changed and which student/practical was affected." action={<button className="secondary-btn" onClick={load}><RefreshCw size={16} /> Refresh</button>} />
+      <article className="panel">
+        {loading ? <Loading /> : items.length ? (
+          <div className="timeline">
+            {items.map((item, index) => (
+              <div className="timeline-item" key={item.id || index}>
+                <div className="timeline-dot"><Activity size={14} /></div>
+                <div className="timeline-content">
+                  <strong>{item.action || "Submission updated"}</strong>
+                  <span>{item.studentName || item.rollNumber || "Student"} · Practical {item.practicalNumber ?? "—"}</span>
+                  <small>{formatDate(item.createdAt)}</small>
+                </div>
+                <div className="timeline-change">{item.oldValue ?? "—"} → {item.newValue ?? "—"}</div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <EmptyState icon={History} title="No history available" description="Once submission statuses change, the audit trail will appear here." />
+        )}
+      </article>
+    </>
+  );
+}
+
+function ExportsPage() {
+  const [busy, setBusy] = useState("");
+  const [message, setMessage] = useState("");
+
+  async function download(path: string, filename: string) {
+    setBusy(filename);
+    setMessage("");
+    try {
+      const response = await fetch(`${API}${path}`, { credentials: "include" });
+      if (!response.ok) throw new Error(`Export failed (${response.status})`);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      setMessage(`${filename} generated.`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Export failed.");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  return (
+    <>
+      <PageHeader eyebrow="REPORTING" title="Exports & reports" description="Download the current tracker data for sharing, printing or offline analysis." />
+      <section className="export-grid">
+        <ExportCard icon={FileSpreadsheet} title="Student Excel" description="Current student register as an .xlsx file." busy={busy === "students.xlsx"} onClick={() => download("/api/exports/students/excel", "students.xlsx")} />
+        <ExportCard icon={Table2} title="Submission Excel" description="Submission status across practicals." busy={busy === "submissions.xlsx"} onClick={() => download("/api/exports/submissions/excel", "submissions.xlsx")} />
+        <ExportCard icon={FileText} title="PDF report" description="Teacher-friendly report for printing or sharing." busy={busy === "report.pdf"} onClick={() => download("/api/exports/report/pdf", "report.pdf")} />
+      </section>
+      {message && <div className="success-banner export-message"><CheckCircle2 size={16} /> {message}</div>}
+    </>
+  );
+}
+
+function ExportCard({ icon: Icon, title, description, busy, onClick }: { icon: typeof FileText; title: string; description: string; busy: boolean; onClick: () => void }) {
+  return (
+    <article className="panel export-card">
+      <div className="export-icon"><Icon size={21} /></div>
+      <h3>{title}</h3>
+      <p>{description}</p>
+      <button className="secondary-btn" disabled={busy} onClick={onClick}>{busy ? <RefreshCw size={16} className="spin" /> : <ArrowDownToLine size={16} />} {busy ? "Generating…" : "Download"}</button>
+    </article>
+  );
+}
+
+function SqlPage() {
+  const examples = [
+    {
+      title: "Find pending submissions",
+      sql: "SELECT student.name, practical.practical_number\nFROM submissions\nJOIN student ON student.id = submissions.student_id\nJOIN practical ON practical.id = submissions.practical_id\nWHERE submissions.submitted = 0;",
+      result: "Returns students whose submission status is pending.",
+    },
+    {
+      title: "Count submitted work",
+      sql: "SELECT COUNT(*)\nFROM submissions\nWHERE submitted = 1;",
+      result: "Counts completed submissions in the tracker.",
+    },
+    {
+      title: "Show the student register",
+      sql: "SELECT roll_number, name\nFROM students\nORDER BY roll_number;",
+      result: "Reads the official student list in roll-number order.",
+    },
+  ];
+
+  const [selected, setSelected] = useState(0);
+
+  return (
+    <>
+      <PageHeader eyebrow="LEARNING MODE" title="SQL Lab" description="Understand what the tracker is doing underneath without giving the browser arbitrary database access." />
+      <section className="sql-layout">
+        <article className="panel sql-list">
+          <div className="eyebrow">QUERY EXAMPLES</div>
+          {examples.map((item, index) => (
+            <button className={`sql-item ${selected === index ? "active" : ""}`} key={item.title} onClick={() => setSelected(index)}>
+              <Database size={16} />
+              <span><strong>{item.title}</strong><small>{item.result}</small></span>
+              <ArrowRight size={15} />
+            </button>
+          ))}
+        </article>
+
+        <article className="panel sql-editor">
+          <div className="editor-top"><span><span className="status-dot" /> Read-only preview</span><span>SQL</span></div>
+          <pre>{examples[selected].sql}</pre>
+          <div className="query-result"><CheckCircle2 size={16} /><strong>{examples[selected].result}</strong></div>
+        </article>
+      </section>
+    </>
+  );
+}
+
+function SettingsPage({ theme, setTheme, me }: { theme: Theme; setTheme: (theme: Theme) => void; me: Me }) {
+  const [status, setStatus] = useState("Checking…");
+
+  async function check() {
+    setStatus("Checking…");
+    try {
+      const result = await api<any>("/api/health");
+      setStatus(result?.database === "connected" ? "Worker + D1 connected" : "Worker online");
+    } catch {
+      setStatus("Backend unavailable");
+    }
+  }
+
+  useEffect(() => {
+    void check();
+  }, []);
+
+  return (
+    <>
+      <PageHeader eyebrow="PREFERENCES" title="Settings" description="Control the workspace appearance and verify the local backend connection." />
+      <section className="settings-grid">
+        <article className="panel">
+          <div className="panel-head"><div><div className="eyebrow">APPEARANCE</div><h3>Theme</h3></div><Sparkles size={18} /></div>
+          <div className="theme-options">
+            <button className={theme === "light" ? "selected" : ""} onClick={() => setTheme("light")}><Sun size={19} /><strong>Light</strong><span>Clean paper-like workspace</span></button>
+            <button className={theme === "dark" ? "selected" : ""} onClick={() => setTheme("dark")}><Moon size={19} /><strong>Dark</strong><span>Low-light focused workspace</span></button>
+          </div>
+        </article>
+
+        <article className="panel">
+          <div className="panel-head"><div><div className="eyebrow">ACCOUNT</div><h3>Teacher account</h3></div><ShieldCheck size={18} /></div>
+          <div className="account-detail"><div className="avatar large">{initials(me.name)}</div><div><strong>{me.name}</strong><span>{me.email}</span></div></div>
+          <div className="connection-card"><span className="status-dot" /><div><strong>{status}</strong><span>API endpoint · {API}</span></div><button className="icon-btn" onClick={check}><RefreshCw size={16} /></button></div>
+        </article>
+      </section>
+    </>
+  );
+}
+
+function EmptyState({ icon: Icon, title, description, action }: { icon: typeof Users; title: string; description: string; action?: React.ReactNode }) {
+  return <div className="empty-state"><div className="empty-icon"><Icon size={22} /></div><h3>{title}</h3><p>{description}</p>{action}</div>;
+}
+
+function Loading() {
+  return <div className="loading-state"><RefreshCw size={20} className="spin" /><span>Loading workspace data…</span></div>;
+}
+
+function InlineError({ message }: { message: string }) {
+  return <div className="form-error"><X size={16} /><span>{message}</span></div>;
+}
+
+export default function App() {
+  const [me, setMe] = useState<Me | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [theme, setThemeState] = useState<Theme>(() => (localStorage.getItem("dpt-theme") as Theme) || "dark");
+  const [page, navigate] = useHashPage();
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("dpt-theme", theme);
+  }, [theme]);
+
+  function setTheme(next: Theme) {
+    setThemeState(next);
+  }
+
+  useEffect(() => {
+    api<any>("/api/auth/me")
+      .then((result) => setMe(unwrap<Me>(result, result)))
+      .catch(() => setMe(null))
+      .finally(() => setChecking(false));
+  }, []);
+
+  async function logout() {
+    try {
+      await api("/api/auth/logout", { method: "POST" });
+    } finally {
+      setMe(null);
+      window.location.hash = "";
+    }
+  }
+
+  if (checking) {
+    return <div className="boot-screen"><Database size={24} /><span>Connecting to PracticalTracker…</span></div>;
+  }
+
+  if (!me) return <Login onLogin={setMe} />;
+
+  let content: React.ReactNode;
+  switch (page) {
+    case "students":
+      content = <StudentsPage navigate={navigate} />;
+      break;
+    case "tracker":
+      content = <TrackerPage />;
+      break;
+    case "practicals":
+      content = <PracticalsPage />;
+      break;
+    case "ocr":
+      content = <OcrPage navigate={navigate} />;
+      break;
+    case "history":
+      content = <HistoryPage />;
+      break;
+    case "exports":
+      content = <ExportsPage />;
+      break;
+    case "sql":
+      content = <SqlPage />;
+      break;
+    case "settings":
+      content = <SettingsPage theme={theme} setTheme={setTheme} me={me} />;
+      break;
+    default:
+      content = <DashboardPage navigate={navigate} />;
+  }
+
+  return (
+    <AppShell
+      me={me}
+      page={page}
+      navigate={navigate}
+      theme={theme}
+      setTheme={setTheme}
+      onLogout={logout}
+    >
+      {content}
+    </AppShell>
+  );
+}
+

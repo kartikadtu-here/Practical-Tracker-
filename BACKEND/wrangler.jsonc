@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "dbms-practical-tracker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "dbms-practical-tracker",
+      "database_id": "ed15a23d-1ed4-4409-99d1-56b7392135de",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "ai": {
+    "binding": "AI",
+    "remote": true
+  }
+}

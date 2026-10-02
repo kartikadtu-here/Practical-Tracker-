@@ -1,0 +1,17 @@
+﻿{
+  "sourceFileName": "dbms-student-list-test.jpg",
+  "students": [
+    {
+      "rollNumber": "01",
+      "name": "Rahul Sharma"
+    },
+    {
+      "rollNumber": "02",
+      "name": "Aman Das"
+    },
+    {
+      "rollNumber": "03",
+      "name": "Rohan Singh"
+    }
+  ]
+}
