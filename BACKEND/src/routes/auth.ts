@@ -54,7 +54,8 @@ auth.post("/login", async (c) => {
             id,
             email,
             name,
-            password_hash
+            password_hash,
+            is_admin
           FROM teachers
           WHERE email = ?
         `)
@@ -64,6 +65,7 @@ auth.post("/login", async (c) => {
           email: string;
           name: string;
           password_hash: string;
+          is_admin: number;
         }>();
 
     if (!teacher) {
@@ -167,6 +169,7 @@ auth.post("/login", async (c) => {
         id: teacher.id,
         email: teacher.email,
         name: teacher.name,
+        is_admin: teacher.is_admin === 1,
       },
       expiresAt,
     });
@@ -263,6 +266,10 @@ auth.post("/invite", requireAuth, async (c) => {
   try {
     const teacher = c.get("teacher");
     const body = await c.req.json();
+    if (!teacher.is_admin) {
+      return c.json({ success: false, message: "Only administrators can invite teachers" }, 403);
+    }
+
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
 
     if (!email) {
@@ -281,10 +288,37 @@ auth.post("/invite", requireAuth, async (c) => {
     .bind(id, email, tokenHash, expiresAt, teacher.id)
     .run();
 
+    if (c.env.RESEND_API_KEY && c.env.RESEND_FROM_EMAIL) {
+      const frontendUrl = c.env.FRONTEND_URL || "https://dbms-practical-tracker-frontend.kartikadtu.workers.dev";
+      const inviteUrl = `${frontendUrl}/#/invite/${token}`;
+
+      await fetch("https://api.resend.com/emails", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${c.env.RESEND_API_KEY}`
+        },
+        body: JSON.stringify({
+          from: c.env.RESEND_FROM_EMAIL,
+          to: email,
+          subject: "You've been invited to PracticalTracker",
+          html: `
+            <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+              <h2>Welcome to PracticalTracker</h2>
+              <p>${teacher.name} has invited you to join the workspace as a teacher.</p>
+              <p>Click the link below to accept your invitation and set up your account:</p>
+              <a href="${inviteUrl}" style="display: inline-block; background-color: #7b9971; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: bold; margin-top: 16px;">Accept Invitation</a>
+              <p style="margin-top: 32px; font-size: 12px; color: #666;">If you have trouble clicking the button, copy and paste this link into your browser: <br/> ${inviteUrl}</p>
+            </div>
+          `
+        })
+      });
+    }
+
     return c.json({
       success: true,
-      message: "Invitation created",
-      token // we send this back exactly ONCE
+      message: "Invitation created and sent",
+      token // still returned just in case email is not configured
     });
   } catch (error) {
     return c.json({

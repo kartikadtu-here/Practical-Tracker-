@@ -11,6 +11,7 @@ export type AuthVariables = {
     id: string;
     email: string;
     name: string;
+    is_admin: boolean;
   };
 };
 
@@ -44,7 +45,8 @@ export const requireAuth: MiddlewareHandler<{
             s.teacher_id,
             s.expires_at,
             t.email,
-            t.name
+            t.name,
+            t.is_admin
           FROM sessions s
           INNER JOIN teachers t
             ON t.id = s.teacher_id
@@ -58,6 +60,7 @@ export const requireAuth: MiddlewareHandler<{
           expires_at: string;
           email: string;
           name: string;
+          is_admin: number;
         }>();
 
     if (!session) {
@@ -74,6 +77,7 @@ export const requireAuth: MiddlewareHandler<{
       id: session.teacher_id,
       email: session.email,
       name: session.name,
+      is_admin: session.is_admin === 1,
     });
 
     await next();

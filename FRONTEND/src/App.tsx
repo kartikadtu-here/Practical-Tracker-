@@ -56,12 +56,14 @@ type Page =
   | "exports"
   | "sql"
   | "settings"
+  | "admin"
   | "invite";
 
 type Me = {
   id: string;
   email: string;
   name: string;
+  is_admin: boolean;
 };
 
 type Student = {
@@ -251,6 +253,7 @@ function useHashPage(): [Page, (page: Page) => void] {
     "exports",
     "sql",
     "settings",
+    "admin",
     "invite",
   ];
 
@@ -843,6 +846,23 @@ function AppShell({
             <Settings size={17} />
             <span>Settings</span>
           </button>
+
+          {me.is_admin && (
+            <button
+              className={`nav-item ${
+                page === "admin"
+                  ? "active"
+                  : ""
+              }`}
+              type="button"
+              onClick={() =>
+                go("admin")
+              }
+            >
+              <ShieldCheck size={17} />
+              <span>Admin</span>
+            </button>
+          )}
 
           <button
             className="nav-item"
@@ -3373,6 +3393,115 @@ ORDER BY roll_number;`,
    SETTINGS
 ========================================================= */
 
+function AdminPage() {
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteLink, setInviteLink] = useState("");
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteError, setInviteError] = useState("");
+  const [successMsg, setSuccessMsg] = useState("");
+
+  async function createInvite(e: FormEvent) {
+    e.preventDefault();
+    setInviteBusy(true);
+    setInviteError("");
+    setInviteLink("");
+    setSuccessMsg("");
+
+    try {
+      const result = await api<any>("/api/auth/invite", {
+        method: "POST",
+        body: JSON.stringify({ email: inviteEmail })
+      });
+      
+      const url = new URL(window.location.href);
+      url.hash = `#/invite/${result.token}`;
+      setInviteLink(url.toString());
+      setInviteEmail("");
+      if (result.message.includes("sent")) {
+        setSuccessMsg("Invitation email sent successfully!");
+      }
+    } catch (err: any) {
+      setInviteError(err.message || "Failed to create invitation");
+    } finally {
+      setInviteBusy(false);
+    }
+  }
+
+  function copyInvite() {
+    navigator.clipboard.writeText(inviteLink);
+  }
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="ADMINISTRATION"
+        title="Admin Panel"
+        description="Manage workspace access and teacher invitations."
+      />
+
+      <section className="settings-grid">
+        <Panel>
+          <div className="panel-head">
+            <div>
+              <div className="eyebrow">INVITATIONS</div>
+              <h2>Invite Teacher</h2>
+            </div>
+            <Users size={18} />
+          </div>
+          
+          <form onSubmit={createInvite} style={{ display: 'grid', gap: '15px', marginTop: '15px' }}>
+            <label style={{ display: 'grid', gap: '6px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--muted)' }}>Email Address</span>
+              <div className="input-wrap">
+                <input 
+                  type="email" 
+                  value={inviteEmail} 
+                  onChange={(e) => setInviteEmail(e.target.value)} 
+                  placeholder="colleague@example.com" 
+                  required 
+                />
+              </div>
+            </label>
+
+            {inviteError && (
+              <div className="form-error">
+                <Info size={15} />
+                <span>{inviteError}</span>
+              </div>
+            )}
+            {successMsg && (
+              <div className="success-banner" style={{ marginTop: '0', background: 'rgba(123, 153, 113, 0.1)', color: '#7b9971', borderColor: 'rgba(123, 153, 113, 0.2)' }}>
+                <CheckCircle2 size={15} />
+                <strong>{successMsg}</strong>
+              </div>
+            )}
+            
+            <button className="primary-btn" disabled={inviteBusy} type="submit" style={{ padding: '12px' }}>
+              {inviteBusy ? "Creating..." : "Create Invitation"}
+            </button>
+          </form>
+
+          {inviteLink && (
+            <div className="success-banner" style={{ marginTop: '15px', flexDirection: 'column', alignItems: 'stretch', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <CheckCircle2 size={15} />
+                <strong>Invitation Created</strong>
+              </div>
+              <div className="input-wrap" style={{ background: 'rgba(0,0,0,0.1)', borderColor: 'rgba(0,0,0,0.1)' }}>
+                <input type="text" readOnly value={inviteLink} style={{ fontSize: '11px' }} />
+                <button type="button" className="input-action" onClick={copyInvite} style={{ color: 'var(--text)' }}>
+                  Copy
+                </button>
+              </div>
+              <span style={{ fontSize: '10px', opacity: 0.8 }}>This link contains a one-time token and expires in 7 days. Do not share it publicly. If RESEND is configured, an email was sent.</span>
+            </div>
+          )}
+        </Panel>
+      </section>
+    </>
+  );
+}
+
 function SettingsPage({
   theme,
   setTheme,
@@ -3383,10 +3512,6 @@ function SettingsPage({
   me: Me;
 }) {
   const [status, setStatus] = useState("Checking...");
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteLink, setInviteLink] = useState("");
-  const [inviteBusy, setInviteBusy] = useState(false);
-  const [inviteError, setInviteError] = useState("");
 
   async function check() {
     setStatus("Checking...");
@@ -3405,35 +3530,6 @@ function SettingsPage({
   useEffect(() => {
     void check();
   }, []);
-
-  async function createInvite(e: FormEvent) {
-    e.preventDefault();
-    setInviteBusy(true);
-    setInviteError("");
-    setInviteLink("");
-
-    try {
-      const result = await api<any>("/api/auth/invite", {
-        method: "POST",
-        body: JSON.stringify({ email: inviteEmail })
-      });
-
-      if (!result.success) throw new Error(result.message);
-
-      const url = new URL(window.location.href);
-      url.hash = `#/invite/${result.token}`;
-      setInviteLink(url.toString());
-      setInviteEmail("");
-    } catch (err: any) {
-      setInviteError(err.message || "Failed to create invitation");
-    } finally {
-      setInviteBusy(false);
-    }
-  }
-
-  function copyInvite() {
-    navigator.clipboard.writeText(inviteLink);
-  }
 
   return (
     <>
@@ -3503,58 +3599,6 @@ function SettingsPage({
               <RefreshCw size={16} />
             </button>
           </div>
-        </Panel>
-        
-        <Panel>
-          <div className="panel-head">
-            <div>
-              <div className="eyebrow">INVITATIONS</div>
-              <h2>Invite Teacher</h2>
-            </div>
-            <Users size={18} />
-          </div>
-          
-          <form onSubmit={createInvite} style={{ display: 'grid', gap: '15px', marginTop: '15px' }}>
-            <label style={{ display: 'grid', gap: '6px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--muted)' }}>Email Address</span>
-              <div className="input-wrap">
-                <input 
-                  type="email" 
-                  value={inviteEmail} 
-                  onChange={(e) => setInviteEmail(e.target.value)} 
-                  placeholder="colleague@example.com" 
-                  required 
-                />
-              </div>
-            </label>
-
-            {inviteError && (
-              <div className="form-error">
-                <Info size={15} />
-                <span>{inviteError}</span>
-              </div>
-            )}
-            
-            <button className="primary-btn" disabled={inviteBusy} type="submit" style={{ padding: '12px' }}>
-              {inviteBusy ? "Creating..." : "Create Invitation"}
-            </button>
-          </form>
-
-          {inviteLink && (
-            <div className="success-banner" style={{ marginTop: '15px', flexDirection: 'column', alignItems: 'stretch', gap: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <CheckCircle2 size={15} />
-                <strong>Invitation Created</strong>
-              </div>
-              <div className="input-wrap" style={{ background: 'rgba(0,0,0,0.1)', borderColor: 'rgba(0,0,0,0.1)' }}>
-                <input type="text" readOnly value={inviteLink} style={{ fontSize: '11px' }} />
-                <button type="button" className="input-action" onClick={copyInvite} style={{ color: 'var(--text)' }}>
-                  Copy
-                </button>
-              </div>
-              <span style={{ fontSize: '10px', opacity: 0.8 }}>This link contains a one-time token and expires in 7 days. Do not share it publicly.</span>
-            </div>
-          )}
         </Panel>
       </section>
     </>
@@ -3714,6 +3758,23 @@ export default function App() {
 
     case "sql":
       content = <SqlPage />;
+      break;
+
+    case "admin":
+      if (!me?.is_admin) {
+        content = (
+          <div className="layout-content">
+            <div className="page-header">
+              <div>
+                <h1>Access Denied</h1>
+                <p>You do not have permission to access the admin panel.</p>
+              </div>
+            </div>
+          </div>
+        );
+      } else {
+        content = <AdminPage />;
+      }
       break;
 
     case "settings":
